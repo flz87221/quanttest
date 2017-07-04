@@ -23,19 +23,24 @@ def init(context):
     # 设置每支股票的资金上限
     context.fundForEachStock = context.stock_account.cash / context.totalstocks
     logger.info("Fund for each stock is " + str(context.fundForEachStock))
+    
+    # 参数
+    
+    # 交易条件的周换手率为 2%
+    context.turnoverrate = 2
 
 
 
 # 每周一触发，该函数用于判断该股票是否连续若干周周收盘价上涨或下跌（周收盘价=周五收盘价）
 def check_condition(stock, weeks, rise):
 
-    logger.info(stock + " check " + str(weeks) + " rise?:" + str(rise))
+    #logger.info(stock + " check " + str(weeks) + " rise?:" + str(rise))
 
     result = True
     historyprice = history_bars(stock, 150, '1d', ['datetime', 'close'])
     lastIndex = np.count_nonzero(historyprice) - 1
 
-    # Dictionary - key is 日历中的第几周（相邻的数周一定不一样），value is 这周周五收盘价(如果周五停牌，就找周四、周三、周二、周一)在 historyprice 中的下标，每一周只有一天的数据
+    # Dictionary - key is 日历中的第几周（相邻的数周该数值不同），value is 这周周五收盘价(如果周五停牌，就找周四、周三、周二、周一)在 historyprice 中的下标，每一周只有一天的数据
     indexesOfWeek = OrderedDict()
     
     # 往前回溯150个交易日，找出若干周的数据，今天的数据为 historyprice[149]，150个交易日前当天的数据为 historyprice[0]
@@ -171,10 +176,10 @@ def filter_stocks(context):
             #净利率大于20%
             fundamentals.financial_indicator.inc_operating_revenue >= 0.2
         )
-        .filter(
-            #营业收入增长率大于20%
-            fundamentals.financial_indicator.net_profit_margin >= 0.2
-        )
+        #.filter(
+        #    #营业收入增长率大于20%
+        #    fundamentals.financial_indicator.net_profit_margin >= 0.2
+        #)
         .filter(
             #营业利润增长率大于20%
             fundamentals.financial_indicator.inc_gross_profit >= 0.2
@@ -183,10 +188,10 @@ def filter_stocks(context):
         #    #资产负债率 <= 50%
         #    fundamentals.financial_indicator.debt_to_asset_ratio <= 0.5
         #)
-        .filter(
-            #经营性现金流为正
-            fundamentals.cash_flow_statement.cash_flow_from_operating_activities > 0
-        )
+        #.filter(
+        #    #经营性现金流为正
+        #    fundamentals.cash_flow_statement.cash_flow_from_operating_activities > 0
+        #)
         #.filter(
         #    #营业收入10亿以上
         #    fundamentals.income_statement.revenue >= 1000000000
@@ -271,23 +276,30 @@ def sell_stock(context, stock, percentage):
     # 如果该股票在投资组合中
     if stock in context.portfolio.positions:
 
-        logger.info("Sell stock " + stock + " with percentage " + str(percentage * 100) + "%")
-
-        # 获取当前该股票在投资组合中的权重
-        curweight = context.portfolio.positions[stock].value_percent
-        logger.info("Stock " + stock + "'s current weight is " + str(curweight * 100) + "%")
-
-        # 设置新权重，percentage为卖掉目前其份额的多少
-        newweight = curweight * (1 - percentage)
-
-        # 根据新权重，卖出股票份额
-        logger.info("Update " + stock + "'s new weight to " + str(newweight * 100) + "%")
-        order_target_percent(stock, newweight)
+        # 只交易当周换手率为特定条件的股票
+        weekTurnoverRates = get_turnover_rate(stock).week
+        currWeekRate = weekTurnoverRates[len(weekTurnoverRates) - 1]
+        logger.info(stock + " weekly turnover rate is " + str(currWeekRate))
         
-        # 如果交易操作为清空该股票，腾出投资组合中一支股票的空间
-        if percentage == 1:
-            context.availableslots += 1
-            logger.info("Sold out " + stock + ", available slots are " + str(context.availableslots))
+        if currWeekRate < context.turnoverrate:
+            
+            logger.info("Sell stock " + stock + " with percentage " + str(percentage * 100) + "%")
+    
+            # 获取当前该股票在投资组合中的权重
+            curweight = context.portfolio.positions[stock].value_percent
+            logger.info("Stock " + stock + "'s current weight is " + str(curweight * 100) + "%")
+    
+            # 设置新权重，percentage为卖掉目前其份额的多少
+            newweight = curweight * (1 - percentage)
+    
+            # 根据新权重，卖出股票份额
+            logger.info("Update " + stock + "'s new weight to " + str(newweight * 100) + "%")
+            order_target_percent(stock, newweight)
+            
+            # 如果交易操作为清空该股票，腾出投资组合中一支股票的空间
+            if percentage == 1:
+                context.availableslots += 1
+                logger.info("Sold out " + stock + ", available slots are " + str(context.availableslots))
 
 
 
@@ -310,14 +322,20 @@ def buy_stock(context, stocks_tobuy):
         # 按照筛选出来的买入股票列表的优先级，调整仓位
         for stock in stocks_tobuy:
     
-            if stocks_tobuy[stock] == 0.33:
-                stocks_onethirdbuy.append(stock)
-    
-            elif stocks_tobuy[stock] == 0.5:
-                stocks_halfbuy.append(stock)
-    
-            elif stocks_tobuy[stock] == 1:
-                stocks_allbuy.append(stock)
+            # 只交易当周换手率为特定条件的股票
+            weekTurnoverRates = get_turnover_rate(stock).week
+            currWeekRate = weekTurnoverRates[len(weekTurnoverRates) - 1]
+            logger.info(stock + " weekly turnover rate is " + str(currWeekRate))
+            
+            if currWeekRate < context.turnoverrate:
+                if stocks_tobuy[stock] == 0.33:
+                    stocks_onethirdbuy.append(stock)
+        
+                elif stocks_tobuy[stock] == 0.5:
+                    stocks_halfbuy.append(stock)
+        
+                elif stocks_tobuy[stock] == 1:
+                    stocks_allbuy.append(stock)
 
         if context.availableslots > 0:
             # 如果投资组合中还有空位，优先买入连跌7周的股票
